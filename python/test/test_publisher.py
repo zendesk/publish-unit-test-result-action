@@ -16,6 +16,71 @@ from publish.unittestresults import UnitTestCase, ParseError
 errors = [ParseError('file', 'error', 1, 2)]
 
 
+def create_unit_test_run_results(files=1,
+                                 errors: List[ParseError] = [],
+                                 suites=2,
+                                 duration=3,
+                                 tests=22, tests_succ=4, tests_skip=5, tests_fail=6, tests_error=7,
+                                 runs=38, runs_succ=8, runs_skip=9, runs_fail=10, runs_error=11) -> UnitTestRunResults:
+    return UnitTestRunResults(
+        files=files,
+        errors=list(errors),
+        suites=suites,
+        duration=duration,
+        tests=tests, tests_succ=tests_succ, tests_skip=tests_skip, tests_fail=tests_fail, tests_error=tests_error,
+        runs=runs, runs_succ=runs_succ, runs_skip=runs_skip, runs_fail=runs_fail, runs_error=runs_error,
+        commit='commit'
+    )
+
+
+def create_unit_test_run_delta_results(files_delta=-1,
+                                       errors=[],
+                                       suites_delta=-2,
+                                       duration_delta=-3,
+                                       tests_delta=-4,
+                                       tests_succ_delta=-5,
+                                       tests_skip_delta=-6,
+                                       tests_fail_delta=-7,
+                                       tests_error_delta=-8,
+                                       runs_delta=-9,
+                                       runs_succ_delta=-10,
+                                       runs_skip_delta=-11,
+                                       runs_fail_delta=-12,
+                                       runs_error_delta=-13) -> UnitTestRunDeltaResults:
+    return UnitTestRunDeltaResults(
+        files={'number': 1, 'delta': files_delta},
+        errors=errors,
+        suites={'number': 2, 'delta': suites_delta},
+        duration={'number': 3, 'delta': duration_delta},
+        tests={'number': 4, 'delta': tests_delta}, tests_succ={'number': 5, 'delta': tests_succ_delta}, tests_skip={'number': 6, 'delta': tests_skip_delta}, tests_fail={'number': 7, 'delta': tests_fail_delta}, tests_error={'number': 8, 'delta': tests_error_delta},
+        runs={'number': 9, 'delta': runs_delta}, runs_succ={'number': 10, 'delta': runs_succ_delta}, runs_skip={'number': 11, 'delta': runs_skip_delta}, runs_fail={'number': 12, 'delta': runs_fail_delta}, runs_error={'number': 13, 'delta': runs_error_delta},
+        commit='commit',
+        reference_type='type', reference_commit='ref'
+    )
+
+
+def create_publish_data(stats: Optional[UnitTestRunResults] = create_unit_test_run_results(),
+                        stats_with_delta: Optional[UnitTestRunDeltaResults] = create_unit_test_run_delta_results()) -> PublishData:
+    return PublishData(
+        title='title',
+        summary='summary',
+        conclusion='conclusion',
+        stats=stats,
+        stats_with_delta=stats_with_delta,
+        annotations=[Annotation(
+            path='path',
+            start_line=1,
+            end_line=2,
+            start_column=3,
+            end_column=4,
+            annotation_level='failure',
+            message='message',
+            title=f'Error processing result file',
+            raw_details='file'
+        )]
+    )
+
+
 class TestPublisher(unittest.TestCase):
 
     @staticmethod
@@ -44,6 +109,7 @@ class TestPublisher(unittest.TestCase):
 
     @staticmethod
     def create_settings(comment_mode=comment_mode_create,
+                        comment_condition=comment_condition_always,
                         compare_earlier=True,
                         hide_comment_mode=hide_comments_mode_off,
                         report_individual_runs=False,
@@ -72,6 +138,7 @@ class TestPublisher(unittest.TestCase):
             check_name='Check Name',
             comment_title='Comment Title',
             comment_mode=comment_mode,
+            comment_condition=comment_condition,
             compare_earlier=compare_earlier,
             pull_request_build=pull_request_build,
             test_changes_limit=test_changes_limit,
@@ -84,26 +151,7 @@ class TestPublisher(unittest.TestCase):
             seconds_between_github_writes=2.5
         )
 
-    stats = UnitTestRunResults(
-        files=1,
-        errors=[],
-        suites=2,
-        duration=3,
-
-        tests=22,
-        tests_succ=4,
-        tests_skip=5,
-        tests_fail=6,
-        tests_error=7,
-
-        runs=38,
-        runs_succ=8,
-        runs_skip=9,
-        runs_fail=10,
-        runs_error=11,
-
-        commit='commit'
-    )
+    stats = create_unit_test_run_results()
 
     def create_mocks(self,
                      repo_name: Optional[str] = None,
@@ -235,7 +283,7 @@ class TestPublisher(unittest.TestCase):
         publisher = mock.MagicMock(Publisher)
         publisher._settings = settings
         publisher.get_pulls = mock.Mock(return_value=prs)
-        publisher.publish_check = mock.Mock(return_value=cr)
+        publisher.publish_check = mock.Mock(return_value=(cr, None))
         Publisher.publish(publisher, stats, cases, 'success')
 
         # return calls to mocked instance, except call to _logger
@@ -243,6 +291,43 @@ class TestPublisher(unittest.TestCase):
                       for call in publisher.mock_calls
                       if not call[0].startswith('_logger.')]
         return mock_calls
+
+    @staticmethod
+    def create_publish_data_mock(has_changes=False, has_failures=False, has_errors=False):
+        data = mock.MagicMock()
+        data.has_changes = has_changes
+        data.has_failures = has_failures
+        data.has_errors = has_errors
+        return data
+
+    def test_settings_require_comment_always(self):
+        settings = self.create_settings(comment_condition=comment_condition_always)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock()), True)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True, has_failures=True, has_errors=True)), True)
+
+    def test_settings_require_comment_changes(self):
+        settings = self.create_settings(comment_condition=comment_condition_changes)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock()), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True)), True)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_failures=True)), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_errors=True)), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True, has_failures=True, has_errors=True)), True)
+
+    def test_settings_require_comment_failures(self):
+        settings = self.create_settings(comment_condition=comment_condition_failures)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock()), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True)), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_failures=True)), True)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_errors=True)), True)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True, has_failures=True, has_errors=True)), True)
+
+    def test_settings_require_comment_errors(self):
+        settings = self.create_settings(comment_condition=comment_condition_errors)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock()), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True)), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_failures=True)), False)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_errors=True)), True)
+        self.assertEqual(settings.require_comment(self.create_publish_data_mock(has_changes=True, has_failures=True, has_errors=True)), True)
 
     def test_publish_without_comment(self):
         settings = self.create_settings(comment_mode=comment_mode_off, hide_comment_mode=hide_comments_mode_off)
@@ -279,6 +364,30 @@ class TestPublisher(unittest.TestCase):
         self.assertEqual('get_pulls', method)
         self.assertEqual((settings.commit, ), args)
         self.assertEqual({}, kwargs)
+
+    def test_publish_with_comment_without_pr_with_require_comment(self):
+        # pretty much same as test_publish_with_comment_without_pr, except that we vary settings.require_comment
+        for require in [False, True]:
+            with self.subTest(require=require):
+                with mock.patch('publish.publisher.Settings.require_comment') as m:
+                    m.return_value = require
+
+                    settings = self.create_settings(comment_mode=comment_mode_create, hide_comment_mode=hide_comments_mode_off)
+                    mock_calls = self.call_mocked_publish(settings, prs=[])
+
+                    self.assertEqual(2 if require else 1, len(mock_calls))
+
+                    (method, args, kwargs) = mock_calls[0]
+                    self.assertEqual('publish_check', method)
+                    self.assertEqual((self.stats, self.cases, 'success'), args)
+                    self.assertEqual({}, kwargs)
+
+                    # we should only see a call for get_pulls if require_comment returns true
+                    if require:
+                        (method, args, kwargs) = mock_calls[1]
+                        self.assertEqual('get_pulls', method)
+                        self.assertEqual((settings.commit, ), args)
+                        self.assertEqual({}, kwargs)
 
     def test_publish_with_comment_without_hiding(self):
         pr = object()
@@ -958,7 +1067,7 @@ class TestPublisher(unittest.TestCase):
 
         # makes gzipped digest deterministic
         with mock.patch('gzip.time.time', return_value=0):
-            check_run = publisher.publish_check(self.stats.with_errors(errors), self.cases, 'conclusion')
+            check_run, _ = publisher.publish_check(self.stats.with_errors(errors), self.cases, 'conclusion')
 
         repo.get_commit.assert_not_called()
         error_annotations = [get_error_annotation(error).to_dict() for error in errors]
@@ -1033,7 +1142,7 @@ class TestPublisher(unittest.TestCase):
 
         # makes gzipped digest deterministic
         with mock.patch('gzip.time.time', return_value=0):
-            check_run = publisher.publish_check(self.stats.with_errors(errors), self.cases, 'conclusion')
+            check_run, _ = publisher.publish_check(self.stats.with_errors(errors), self.cases, 'conclusion')
 
         repo.get_commit.assert_called_once_with(earlier_commit)
         error_annotations = [get_error_annotation(error).to_dict() for error in errors]
@@ -1095,7 +1204,7 @@ class TestPublisher(unittest.TestCase):
 
         # makes gzipped digest deterministic
         with mock.patch('gzip.time.time', return_value=0):
-            check_run = publisher.publish_check(self.stats, self.cases, 'conclusion')
+            check_run, _ = publisher.publish_check(self.stats, self.cases, 'conclusion')
 
         repo.get_commit.assert_not_called()
         create_check_run_kwargs = dict(
@@ -1154,7 +1263,7 @@ class TestPublisher(unittest.TestCase):
 
         # makes gzipped digest deterministic
         with mock.patch('gzip.time.time', return_value=0):
-            check_run = publisher.publish_check(self.stats, cases, 'conclusion')
+            check_run, _ = publisher.publish_check(self.stats, cases, 'conclusion')
 
         repo.get_commit.assert_called_once_with(earlier_commit)
         # we expect a single call to create_check_run
@@ -1230,41 +1339,8 @@ class TestPublisher(unittest.TestCase):
             gh, gha, req, repo, commit = self.create_mocks(digest=self.base_digest, check_names=[settings.check_name])
             publisher = Publisher(settings, gh, gha)
 
-            data = PublishData(
-                title='title',
-                summary='summary',
-                conclusion='conclusion',
-                stats=UnitTestRunResults(
-                    files=1,
-                    errors=[ParseError('file', 'message', 1, 2)],
-                    suites=2,
-                    duration=3,
-                    tests=4, tests_succ=5, tests_skip=6, tests_fail=7, tests_error=8,
-                    runs=9, runs_succ=10, runs_skip=11, runs_fail=12, runs_error=13,
-                    commit='commit'
-                ),
-                stats_with_delta=UnitTestRunDeltaResults(
-                    files={'number': 1, 'delta': -1},
-                    errors=[ParseError('file', 'message', 1, 2), ParseError('file2', 'message2', 2, 4)],
-                    suites={'number': 2, 'delta': -2},
-                    duration={'number': 3, 'delta': -3},
-                    tests={'number': 4, 'delta': -4}, tests_succ={'number': 5, 'delta': -5}, tests_skip={'number': 6, 'delta': -6}, tests_fail={'number': 7, 'delta': -7}, tests_error={'number': 8, 'delta': -8},
-                    runs={'number': 9, 'delta': -9}, runs_succ={'number': 10, 'delta': -10}, runs_skip={'number': 11, 'delta': -11}, runs_fail={'number': 12, 'delta': -12}, runs_error={'number': 13, 'delta': -13},
-                    commit='commit',
-                    reference_type='type', reference_commit='ref'
-                ),
-                annotations=[Annotation(
-                    path='path',
-                    start_line=1,
-                    end_line=2,
-                    start_column=3,
-                    end_column=4,
-                    annotation_level='failure',
-                    message='message',
-                    title=f'Error processing result file',
-                    raw_details='file'
-                )]
-            )
+            data = create_publish_data(stats=create_unit_test_run_results(errors=errors),
+                                       stats_with_delta=create_unit_test_run_delta_results(errors=[ParseError('file', 'message', 1, 2), ParseError('file2', 'message2', 2, 4)]))
             publisher.publish_json(data)
             gha.error.assert_not_called()
 
@@ -1276,7 +1352,7 @@ class TestPublisher(unittest.TestCase):
                     '"title": "title", '
                     '"summary": "summary", '
                     '"conclusion": "conclusion", '
-                    '"stats": {"files": 1, "errors": [{"file": "file", "message": "message", "line": 1, "column": 2}], "suites": 2, "duration": 3, "tests": 4, "tests_succ": 5, "tests_skip": 6, "tests_fail": 7, "tests_error": 8, "runs": 9, "runs_succ": 10, "runs_skip": 11, "runs_fail": 12, "runs_error": 13, "commit": "commit"}, '
+                    '"stats": {"files": 1, "errors": [{"file": "file", "message": "error", "line": 1, "column": 2}], "suites": 2, "duration": 3, "tests": 22, "tests_succ": 4, "tests_skip": 5, "tests_fail": 6, "tests_error": 7, "runs": 38, "runs_succ": 8, "runs_skip": 9, "runs_fail": 10, "runs_error": 11, "commit": "commit"}, '
                     '"stats_with_delta": {"files": {"number": 1, "delta": -1}, "errors": [{"file": "file", "message": "message", "line": 1, "column": 2}, {"file": "file2", "message": "message2", "line": 2, "column": 4}], "suites": {"number": 2, "delta": -2}, "duration": {"number": 3, "delta": -3}, "tests": {"number": 4, "delta": -4}, "tests_succ": {"number": 5, "delta": -5}, "tests_skip": {"number": 6, "delta": -6}, "tests_fail": {"number": 7, "delta": -7}, "tests_error": {"number": 8, "delta": -8}, "runs": {"number": 9, "delta": -9}, "runs_succ": {"number": 10, "delta": -10}, "runs_skip": {"number": 11, "delta": -11}, "runs_fail": {"number": 12, "delta": -12}, "runs_error": {"number": 13, "delta": -13}, "commit": "commit", "reference_type": "type", "reference_commit": "ref"}, '
                     '"annotations": [{"path": "path", "start_line": 1, "end_line": 2, "start_column": 3, "end_column": 4, "annotation_level": "failure", "message": "message", "title": "Error processing result file", "raw_details": "file"}]'
                     '}',
@@ -1289,11 +1365,73 @@ class TestPublisher(unittest.TestCase):
                 "title": "title",
                 "summary": "summary",
                 "conclusion": "conclusion",
-                "stats": {"files": 1, "errors": 1, "suites": 2, "duration": 3, "tests": 4, "tests_succ": 5, "tests_skip": 6, "tests_fail": 7, "tests_error": 8, "runs": 9, "runs_succ": 10, "runs_skip": 11, "runs_fail": 12, "runs_error": 13, "commit": "commit"},
+                "stats": {"files": 1, "errors": 1, "suites": 2, "duration": 3, "tests": 22, "tests_succ": 4, "tests_skip": 5, "tests_fail": 6, "tests_error": 7, "runs": 38, "runs_succ": 8, "runs_skip": 9, "runs_fail": 10, "runs_error": 11, "commit": "commit"},
                 "stats_with_delta": {"files": {"number": 1, "delta": -1}, "errors": 2, "suites": {"number": 2, "delta": -2}, "duration": {"number": 3, "delta": -3}, "tests": {"number": 4, "delta": -4}, "tests_succ": {"number": 5, "delta": -5}, "tests_skip": {"number": 6, "delta": -6}, "tests_fail": {"number": 7, "delta": -7}, "tests_error": {"number": 8, "delta": -8}, "runs": {"number": 9, "delta": -9}, "runs_succ": {"number": 10, "delta": -10}, "runs_skip": {"number": 11, "delta": -11}, "runs_fail": {"number": 12, "delta": -12}, "runs_error": {"number": 13, "delta": -13}, "commit": "commit", "reference_type": "type", "reference_commit": "ref"},
                 "annotations": 1
             }
             gha.set_output.assert_called_once_with('json', json.dumps(expected))
+
+    def test_publish_data_has_changes(self):
+        def create_stats_with_delta(files_delta=0,
+                                    suites_delta=0,
+                                    duration_delta=0,
+                                    tests_delta=0,
+                                    tests_succ_delta=0,
+                                    tests_skip_delta=0,
+                                    tests_fail_delta=0,
+                                    tests_error_delta=0,
+                                    runs_delta=0,
+                                    runs_succ_delta=0,
+                                    runs_skip_delta=0,
+                                    runs_fail_delta=0,
+                                    runs_error_delta=0) -> UnitTestRunDeltaResults:
+            return create_unit_test_run_delta_results(files_delta=files_delta, suites_delta=suites_delta, duration_delta=duration_delta,
+                                                      tests_delta=tests_delta, tests_succ_delta=tests_succ_delta, tests_skip_delta=tests_skip_delta, tests_fail_delta=tests_fail_delta, tests_error_delta=tests_error_delta,
+                                                      runs_delta=runs_delta, runs_succ_delta=runs_succ_delta, runs_skip_delta=runs_skip_delta, runs_fail_delta=runs_fail_delta, runs_error_delta=runs_error_delta)
+
+        for label, data, expected in [('no stats with deltas', create_publish_data(stats_with_delta=None), True),
+                                      ('no deltas', create_publish_data(stats_with_delta=create_stats_with_delta()), False),
+                                      ('files', create_publish_data(stats_with_delta=create_stats_with_delta(files_delta=1)), True),
+                                      ('suites', create_publish_data(stats_with_delta=create_stats_with_delta(suites_delta=1)), True),
+                                      ('duration', create_publish_data(stats_with_delta=create_stats_with_delta(duration_delta=1)), False),
+                                      ('tests', create_publish_data(stats_with_delta=create_stats_with_delta(tests_delta=1)), True),
+                                      ('tests succ', create_publish_data(stats_with_delta=create_stats_with_delta(tests_succ_delta=1)), True),
+                                      ('tests skip', create_publish_data(stats_with_delta=create_stats_with_delta(tests_skip_delta=1)), True),
+                                      ('tests fail', create_publish_data(stats_with_delta=create_stats_with_delta(tests_fail_delta=1)), True),
+                                      ('tests error', create_publish_data(stats_with_delta=create_stats_with_delta(tests_error_delta=1)), True),
+                                      ('runs', create_publish_data(stats_with_delta=create_stats_with_delta(runs_delta=1)), True),
+                                      ('runs succ', create_publish_data(stats_with_delta=create_stats_with_delta(runs_succ_delta=1)), True),
+                                      ('runs skip', create_publish_data(stats_with_delta=create_stats_with_delta(runs_skip_delta=1)), True),
+                                      ('runs fail', create_publish_data(stats_with_delta=create_stats_with_delta(runs_fail_delta=1)), True),
+                                      ('runs error', create_publish_data(stats_with_delta=create_stats_with_delta(runs_error_delta=1)), True)]:
+            with self.subTest(msg=label):
+                self.assertEqual(data.has_changes, expected, msg=label)
+
+    def test_publish_data_has_failures(self):
+        def create_stats(errors=[], tests_fail=0, tests_error=0, runs_fail=0, runs_error=0) -> UnitTestRunResults:
+            return create_unit_test_run_results(errors=errors, tests_fail=tests_fail, tests_error=tests_error, runs_fail=runs_fail, runs_error=runs_error)
+
+        for label, data, expected in [('no failures', create_publish_data(stats=create_stats()), False),
+                                      ('errors', create_publish_data(stats=create_stats(errors=errors)), False),
+                                      ('test failures', create_publish_data(stats=create_stats(tests_fail=1)), True),
+                                      ('test errors', create_publish_data(stats=create_stats(tests_error=1)), False),
+                                      ('runs failures', create_publish_data(stats=create_stats(runs_fail=1)), True),
+                                      ('runs errors', create_publish_data(stats=create_stats(runs_error=1)), False)]:
+            with self.subTest(msg=label):
+                self.assertEqual(data.has_failures, expected, msg=label)
+
+    def test_publish_data_has_errors(self):
+        def create_stats(errors=[], tests_fail=0, tests_error=0, runs_fail=0, runs_error=0) -> UnitTestRunResults:
+            return create_unit_test_run_results(errors=errors, tests_fail=tests_fail, tests_error=tests_error, runs_fail=runs_fail, runs_error=runs_error)
+
+        for label, data, expected in [('no errors', create_publish_data(stats=create_stats()), False),
+                                      ('errors', create_publish_data(stats=create_stats(errors=errors)), True),
+                                      ('test failures', create_publish_data(stats=create_stats(tests_fail=1)), False),
+                                      ('test errors', create_publish_data(stats=create_stats(tests_error=1)), True),
+                                      ('runs failures', create_publish_data(stats=create_stats(runs_fail=1)), False),
+                                      ('runs errors', create_publish_data(stats=create_stats(runs_error=1)), True)]:
+            with self.subTest(msg=label):
+                self.assertEqual(data.has_errors, expected, msg=label)
 
     def test_publish_comment(self):
         settings = self.create_settings(event={'pull_request': {'base': {'sha': 'commit base'}}}, event_name='pull_request')
