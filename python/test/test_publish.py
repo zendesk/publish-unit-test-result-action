@@ -93,6 +93,17 @@ class PublishTest(unittest.TestCase):
         self.assertIsNone(changes.remaining_and_un_skipped())
         self.assertIsNone(changes.removed_skips())
 
+    def test_test_changes_has_changes(self):
+        for changes, expected in [(SomeTestChanges(None, None, None, None), False),
+                                  (SomeTestChanges([], [], [], []), False),
+                                  (SomeTestChanges(['one'], ['one'], ['two'], ['two']), False),
+                                  (SomeTestChanges(['one'], ['three'], ['two'], ['two']), True),
+                                  (SomeTestChanges(['one'], ['one'], ['two'], ['three']), True),
+                                  (SomeTestChanges(['one'], ['two'], ['two'], ['three']), True),
+                                  (SomeTestChanges(['one'], None, ['two'], None), False),
+                                  (SomeTestChanges(None, ['one'], None, ['two']), False)]:
+            self.assertEqual(changes.has_changes, expected, str(changes))
+
     def test_abbreviate_characters(self):
         # None string
         self.assertIsNone(abbreviate(None, 1))
