@@ -184,7 +184,8 @@ class Test(unittest.TestCase):
             ignore_runs=ignore_runs,
             check_run_annotation=check_run_annotation.copy(),
             seconds_between_github_reads=seconds_between_github_reads,
-            seconds_between_github_writes=seconds_between_github_writes
+            seconds_between_github_writes=seconds_between_github_writes,
+            job_summary=True
         )
 
     def test_get_settings(self):

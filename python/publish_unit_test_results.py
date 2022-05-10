@@ -294,7 +294,8 @@ def get_settings(options: dict, gha: Optional[GithubAction] = None) -> Settings:
         ignore_runs=get_bool_var('IGNORE_RUNS', options, default=False, gha=gha),
         check_run_annotation=annotations,
         seconds_between_github_reads=float(seconds_between_github_reads),
-        seconds_between_github_writes=float(seconds_between_github_writes)
+        seconds_between_github_writes=float(seconds_between_github_writes),
+        job_summary=get_bool_var('JOB_SUMMARY', options, default=True, gha=gha),
     )
 
     check_var(settings.token, 'GITHUB_TOKEN', 'GitHub token')
